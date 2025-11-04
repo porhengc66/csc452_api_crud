@@ -1,75 +1,92 @@
-const express = require('express')
-const cors = require('cors')
-const mysql = require('mysql2')
-require('dotenv').config()
-const app = express()
+const express = require('express');
+const cors = require('cors');
+const mysql = require('mysql2/promise');
 
-app.use(cors())
-app.use(express.json())
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-const connection = mysql.createConnection(process.env.DATABASE_URL)
+// Reuse a single pool across invocations (serverless-friendly)
+let pool;
+function getPool() {
+  if (!pool) {
+    pool = mysql.createPool(process.env.DATABASE_URL);
+  }
+  return pool;
+}
 
 app.get('/', (req, res) => {
-    res.send('Hello world!!')
-})
+  res.send('Hello world!!');
+});
 
-app.get('/users', (req, res) => {
-    connection.query(
-        'SELECT * FROM users',
-        function (err, results, fields) {
-            res.send(results)
-        }
-    )
-})
+app.get('/healthz/db', async (req, res) => {
+  try {
+    const [rows] = await getPool().query('SELECT 1 AS ok');
+    res.json({ ok: true, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
-app.get('/users/:id', (req, res) => {
-    const id = req.params.id;
-    connection.query(
-        'SELECT * FROM users WHERE id = ?', [id],
-        function (err, results, fields) {
-            res.send(results)
-        }
-    )
-})
+app.get('/users', async (req, res) => {
+  try {
+    const [rows] = await getPool().query('SELECT * FROM users');
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-app.post('/users', (req, res) => {
-    connection.query(
-        'INSERT INTO `users` (`fname`, `lname`, `username`, `password`, `avatar`) VALUES (?, ?, ?, ?, ?)',
-        [req.body.fname, req.body.lname, req.body.username, req.body.password, req.body.avatar],
-         function (err, results, fields) {
-            if (err) {
-                console.error('Error in POST /users:', err);
-                res.status(500).send('Error adding user');
-            } else {
-                res.status(200).send(results);
-            }
-        }
-    )
-})
+app.get('/users/:id', async (req, res) => {
+  try {
+    const [rows] = await getPool().execute(
+      'SELECT * FROM users WHERE id = ?',
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-app.put('/users', (req, res) => {
-    connection.query(
-        'UPDATE `users` SET `fname`=?, `lname`=?, `username`=?, `password`=?, `avatar`=? WHERE id =?',
-        [req.body.fname, req.body.lname, req.body.username, req.body.password, req.body.avatar, req.body.id],
-         function (err, results, fields) {
-            res.send(results)
-        }
-    )
-})
+app.post('/users', async (req, res) => {
+  try {
+    const { fname, lname, username, password, avatar } = req.body;
+    const [result] = await getPool().execute(
+      'INSERT INTO `users` (`fname`, `lname`, `username`, `password`, `avatar`) VALUES (?, ?, ?, ?, ?)',
+      [fname, lname, username, password, avatar]
+    );
+    res.status(201).json({ id: result.insertId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-app.delete('/users', (req, res) => {
-    connection.query(
-        'DELETE FROM `users` WHERE id =?',
-        [req.body.id],
-         function (err, results, fields) {
-            res.send(results)
-        }
-    )
-})
+app.put('/users', async (req, res) => {
+  try {
+    const { id, fname, lname, username, password, avatar } = req.body;
+    const [result] = await getPool().execute(
+      'UPDATE `users` SET `fname`=?, `lname`=?, `username`=?, `password`=?, `avatar`=? WHERE id = ?',
+      [fname, lname, username, password, avatar, id]
+    );
+    res.json({ affectedRows: result.affectedRows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-app.listen(process.env.PORT || 3000, () => {
-    console.log('CORS-enabled web server listening on port 3000')
-})
+app.delete('/users', async (req, res) => {
+  try {
+    const { id } = req.body;
+    const [result] = await getPool().execute(
+      'DELETE FROM `users` WHERE id = ?',
+      [id]
+    );
+    res.json({ affectedRows: result.affectedRows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-// export the app for vercel serverless functions
-module.exports = app;
+// Export handler for Vercel
+module.exports = (req, res) => app(req, res);
