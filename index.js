@@ -1,3 +1,4 @@
+// index.js
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -6,7 +7,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Reuse a single pool across invocations (serverless-friendly)
+// serverless-safe, reused pool
 let pool;
 function getPool() {
   if (!pool) {
@@ -15,9 +16,7 @@ function getPool() {
   return pool;
 }
 
-app.get('/', (req, res) => {
-  res.send('Hello world!!');
-});
+app.get('/', (req, res) => res.send('Hello world!!'));
 
 app.get('/healthz/db', async (req, res) => {
   try {
@@ -39,10 +38,7 @@ app.get('/users', async (req, res) => {
 
 app.get('/users/:id', async (req, res) => {
   try {
-    const [rows] = await getPool().execute(
-      'SELECT * FROM users WHERE id = ?',
-      [req.params.id]
-    );
+    const [rows] = await getPool().execute('SELECT * FROM users WHERE id = ?', [req.params.id]);
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -78,15 +74,12 @@ app.put('/users', async (req, res) => {
 app.delete('/users', async (req, res) => {
   try {
     const { id } = req.body;
-    const [result] = await getPool().execute(
-      'DELETE FROM `users` WHERE id = ?',
-      [id]
-    );
+    const [result] = await getPool().execute('DELETE FROM `users` WHERE id = ?', [id]);
     res.json({ affectedRows: result.affectedRows });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Export handler for Vercel
+// Export handler for Vercel (no app.listen)
 module.exports = (req, res) => app(req, res);
